@@ -29,10 +29,10 @@ images = svc.cutout(
 )
 
 # find all (visit, detector) containing sky coordinates at a given time
-hits = svc.find_visit_detector(ra=53.0, dec=-27.91, t="2024-11-09T06:12:10")
+visit, detector = svc.find_visit_detector(ra=53.0, dec=-27.91, t="2024-11-09T06:12:10")
 
-# vectorized lookup (one result list per input row)
-hits_many = svc.find_visit_detector(
+# vectorized lookup returns flattened matches in input order
+visit_many, detector_many = svc.find_visit_detector(
     ra=[53.0, 53.1],
     dec=[-27.91, -27.95],
     t=["2024-11-09T06:12:10", "2024-11-09T06:13:10"],
@@ -58,5 +58,5 @@ images = svc.cutout(
 - If center is (`ra`, `dec`), WCS is used to convert to pixel coordinates.
 - `visit`, `detector`, `x`, `y`, `ra`, and `dec` can be scalars or arrays. Arrays are paired by index.
 - If `h`/`w` are omitted they default to full image size.
-- `find_visit_detector(...)` returns all `(visit, detector)` that contain `(ra, dec)` and satisfy `begin <= t < end`; it accepts scalar or 1D vector inputs.
+- `find_visit_detector(...)` returns two 1D numpy arrays `(visit, detector)` for all matches that contain `(ra, dec)` and satisfy `begin <= t < end`; it accepts scalar or 1D vector inputs.
 - The sky-coordinate mode (`ra/dec/time`) is wired and needs a `sky_resolver` callback.

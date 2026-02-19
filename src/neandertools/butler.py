@@ -102,7 +102,7 @@ class ButlerCutoutService:
         t: Union[datetime, str, Time, Sequence[datetime], Sequence[str], Sequence[Time]],
         *,
         dataset_type: str = "visit_image",
-    ) -> Union[list[tuple[int, int]], list[list[tuple[int, int]]]]:
+    ) -> tuple[Any, Any]:
         """Find (visit, detector) entries containing sky position at exposure time.
 
         Parameters
@@ -114,6 +114,8 @@ class ButlerCutoutService:
         dataset_type : str
             Dataset type used to build the visit/detector index.
         """
+        import numpy as np
+
         ra_values = _as_list(ra, "ra")
         dec_values = _as_list(dec, "dec")
         t_values = _as_list(t, "t")
@@ -126,11 +128,11 @@ class ButlerCutoutService:
         t_values = [_to_astropy_time(v) for v in t_values]
 
         index = self._get_visit_detector_index(dataset_type)
-        all_matches: list[list[tuple[int, int]]] = []
+        visits: list[int] = []
+        detectors: list[int] = []
 
         for ra_i, dec_i, t_i in zip(ra_values, dec_values, t_values):
             point = UnitVector3d(LonLat.fromDegrees(float(ra_i), float(dec_i)))
-            matches: list[tuple[int, int]] = []
             for row in index:
                 if "timespan" in row:
                     if not row["timespan"].contains(t_i):
@@ -139,12 +141,10 @@ class ButlerCutoutService:
                     if not (row["begin"] <= t_i < row["end"]):
                         continue
                 if row["region"].contains(point):
-                    matches.append((row["visit"], row["detector"]))
-            all_matches.append(matches)
+                    visits.append(row["visit"])
+                    detectors.append(row["detector"])
 
-        if n == 1:
-            return all_matches[0]
-        return all_matches
+        return np.asarray(visits, dtype=np.int64), np.asarray(detectors, dtype=np.int64)
 
     def _extract_cutout(
         self,

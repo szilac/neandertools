@@ -198,6 +198,8 @@ def test_invalid_args():
 
 
 def test_find_visit_detector_scalar_and_vector():
+    np = pytest.importorskip("numpy")
+
     class AlwaysContainsRegion:
         def contains(self, _point):
             return True
@@ -221,8 +223,12 @@ def test_find_visit_detector_scalar_and_vector():
         t=["2024-01-01T00:00:30", "2024-01-01T00:02:00"],
     )
 
-    assert one == [(101, 5)]
-    assert many == [[(101, 5)], []]
+    assert isinstance(one[0], np.ndarray)
+    assert isinstance(one[1], np.ndarray)
+    assert one[0].tolist() == [101]
+    assert one[1].tolist() == [5]
+    assert many[0].tolist() == [101]
+    assert many[1].tolist() == [5]
 
 
 def test_find_visit_detector_length_mismatch_raises():
