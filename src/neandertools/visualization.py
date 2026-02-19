@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -78,6 +79,169 @@ def cutouts_grid(
         ``(fig, axes)`` from matplotlib.
     """
     n = len(images)
+    arrays, vmins, vmaxs, extent = _prepare_cutouts_for_display(
+        images=images,
+        qmin=qmin,
+        qmax=qmax,
+        match_background=match_background,
+        match_noise=match_noise,
+        sigma_clip=sigma_clip,
+        sigma_clip_iters=sigma_clip_iters,
+        warp_common_grid=warp_common_grid,
+        warp_shape=warp_shape,
+        warp_pixel_scale_arcsec=warp_pixel_scale_arcsec,
+    )
+
+    nrows = math.ceil(n / ncols)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(figsize_per_cell[0] * ncols, figsize_per_cell[1] * nrows),
+        squeeze=False,
+    )
+
+    for i, arr in enumerate(arrays):
+        r, c = divmod(i, ncols)
+        ax = axes[r][c]
+
+        im = ax.imshow(
+            arr,
+            origin="lower",
+            vmin=vmins[i],
+            vmax=vmaxs[i],
+            cmap=cmap,
+            interpolation="nearest",
+            extent=extent,
+        )
+
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_aspect("equal")
+
+        if titles is not None:
+            ax.set_title(titles[i], fontsize=10)
+
+        if add_colorbar:
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        if warp_common_grid:
+            ax.set_xlabel("Delta R.A. (arcsec)")
+            if c == 0:
+                ax.set_ylabel("Delta Dec. (arcsec)")
+
+    for j in range(n, nrows * ncols):
+        r, c = divmod(j, ncols)
+        axes[r][c].axis("off")
+
+    fig.tight_layout()
+    if show:
+        plt.show()
+
+    return fig, axes
+
+
+def cutouts_gif(
+    images: Sequence[Any],
+    output_path: str | Path = "cutouts.gif",
+    titles: Sequence[str] | None = None,
+    figsize: tuple[float, float] = (5.0, 5.0),
+    qmin: float = 0.0,
+    qmax: float = 0.99,
+    match_background: bool = True,
+    match_noise: bool = False,
+    sigma_clip: float = 3.0,
+    sigma_clip_iters: int = 5,
+    warp_common_grid: bool = False,
+    warp_shape: tuple[int, int] | None = None,
+    warp_pixel_scale_arcsec: float | None = None,
+    cmap: str = "gray_r",
+    frame_duration_ms: int = 300,
+    dpi: int = 100,
+    show: bool = False,
+) -> Path:
+    """Save cutouts as an animated GIF.
+
+    Parameters are analogous to ``cutouts_grid``; each image is rendered as one
+    frame of the output GIF.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the created GIF file.
+    """
+    if frame_duration_ms <= 0:
+        raise ValueError("frame_duration_ms must be > 0")
+    if dpi <= 0:
+        raise ValueError("dpi must be > 0")
+
+    arrays, vmins, vmaxs, extent = _prepare_cutouts_for_display(
+        images=images,
+        qmin=qmin,
+        qmax=qmax,
+        match_background=match_background,
+        match_noise=match_noise,
+        sigma_clip=sigma_clip,
+        sigma_clip_iters=sigma_clip_iters,
+        warp_common_grid=warp_common_grid,
+        warp_shape=warp_shape,
+        warp_pixel_scale_arcsec=warp_pixel_scale_arcsec,
+    )
+
+    from matplotlib.animation import PillowWriter
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(1, 1, figsize=figsize, squeeze=True)
+    im = ax.imshow(
+        arrays[0],
+        origin="lower",
+        vmin=vmins[0],
+        vmax=vmaxs[0],
+        cmap=cmap,
+        interpolation="nearest",
+        extent=extent,
+    )
+    ax.set_aspect("equal")
+    if warp_common_grid:
+        ax.set_xlabel("Delta R.A. (arcsec)")
+        ax.set_ylabel("Delta Dec. (arcsec)")
+    else:
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    frame_title = ax.set_title("")
+    fps = 1000.0 / float(frame_duration_ms)
+    writer = PillowWriter(fps=fps)
+    with writer.saving(fig, str(output_path), dpi=dpi):
+        for i, arr in enumerate(arrays):
+            im.set_data(arr)
+            im.set_clim(vmins[i], vmaxs[i])
+            if titles is not None:
+                frame_title.set_text(str(titles[i]))
+            elif len(arrays) > 1:
+                frame_title.set_text(f"Frame {i + 1}/{len(arrays)}")
+            writer.grab_frame()
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return output_path
+
+
+def _prepare_cutouts_for_display(
+    *,
+    images: Sequence[Any],
+    qmin: float,
+    qmax: float,
+    match_background: bool,
+    match_noise: bool,
+    sigma_clip: float,
+    sigma_clip_iters: int,
+    warp_common_grid: bool,
+    warp_shape: tuple[int, int] | None,
+    warp_pixel_scale_arcsec: float | None,
+) -> tuple[list[np.ndarray], list[float], list[float], tuple[float, float, float, float] | None]:
+    n = len(images)
     if n == 0:
         raise ValueError("No images provided.")
     if not (0.0 <= qmin <= 1.0 and 0.0 <= qmax <= 1.0):
@@ -92,14 +256,6 @@ def cutouts_grid(
         raise ValueError("warp_shape dimensions must be > 0")
     if warp_pixel_scale_arcsec is not None and warp_pixel_scale_arcsec <= 0:
         raise ValueError("warp_pixel_scale_arcsec must be > 0")
-
-    nrows = math.ceil(n / ncols)
-    fig, axes = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(figsize_per_cell[0] * ncols, figsize_per_cell[1] * nrows),
-        squeeze=False,
-    )
 
     arrays = []
     image_info = []
@@ -143,8 +299,8 @@ def cutouts_grid(
             proc_arrays.append(arr)
 
     shared_scale = match_background or match_noise
-    shared_vmin: float | None = None
-    shared_vmax: float | None = None
+    vmins = []
+    vmaxs = []
     if shared_scale:
         finite_parts = [arr[np.isfinite(arr)] for arr in proc_arrays if np.any(np.isfinite(arr))]
         if not finite_parts:
@@ -154,53 +310,18 @@ def cutouts_grid(
         shared_vmax = float(np.quantile(all_values, qmax))
         if shared_vmax <= shared_vmin:
             shared_vmax = shared_vmin + 1e-12
-
-    for i, arr in enumerate(proc_arrays):
-        r, c = divmod(i, ncols)
-        ax = axes[r][c]
-        if shared_scale:
-            assert shared_vmin is not None and shared_vmax is not None
-            vmin = shared_vmin
-            vmax = shared_vmax
-        else:
-            vmin = np.nanquantile(arr, qmin)
-            vmax = np.nanquantile(arr, qmax)
+        vmins = [shared_vmin] * n
+        vmaxs = [shared_vmax] * n
+    else:
+        for arr in proc_arrays:
+            vmin = float(np.nanquantile(arr, qmin))
+            vmax = float(np.nanquantile(arr, qmax))
             if vmax <= vmin:
                 vmax = vmin + 1e-12
+            vmins.append(vmin)
+            vmaxs.append(vmax)
 
-        im = ax.imshow(
-            arr,
-            origin="lower",
-            vmin=vmin,
-            vmax=vmax,
-            cmap=cmap,
-            interpolation="nearest",
-            extent=extent,
-        )
-
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_aspect("equal")
-
-        if titles is not None:
-            ax.set_title(titles[i], fontsize=10)
-
-        if add_colorbar:
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        if warp_common_grid:
-            ax.set_xlabel("Delta R.A. (arcsec)")
-            if c == 0:
-                ax.set_ylabel("Delta Dec. (arcsec)")
-
-    for j in range(n, nrows * ncols):
-        r, c = divmod(j, ncols)
-        axes[r][c].axis("off")
-
-    fig.tight_layout()
-    if show:
-        plt.show()
-
-    return fig, axes
+    return proc_arrays, vmins, vmaxs, extent
 
 
 def _sigma_clipped_bg_rms(arr: np.ndarray, sigma: float, maxiters: int) -> tuple[float, float]:
