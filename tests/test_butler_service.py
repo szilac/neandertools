@@ -238,29 +238,6 @@ def test_visit_detector_cutout_accepts_numpy_arrays():
     ]
 
 
-def test_sky_cutout_requires_resolver():
-    butler = FakeButler()
-    svc = nt.cutouts_from_butler("dp1", collections="test", butler=butler)
-
-    with pytest.raises(NotImplementedError):
-        svc.cutout(ra=10.0, dec=-1.0, h=7, w=7)
-
-
-def test_sky_cutout_with_resolver_and_dataset_type_override():
-    butler = FakeButler()
-    resolver_calls = []
-
-    def resolver(ra, dec, time):
-        resolver_calls.append((ra, dec, time))
-        return [{"visit": 1, "detector": 2}, {"visit": 1, "detector": 3}]
-
-    svc = nt.cutouts_from_butler("dp1", collections="test", butler=butler, sky_resolver=resolver)
-    out = svc.cutout(ra=1.2, dec=3.4, time="2025-01-01T00:00:00", h=11, w=11, dataset_type="raw")
-
-    assert resolver_calls == [(1.2, 3.4, "2025-01-01T00:00:00")]
-    assert out == [{"data": {"visit": 1, "detector": 2}}, {"data": {"visit": 1, "detector": 3}}]
-
-
 def test_invalid_args():
     butler = FakeButler()
     svc = nt.cutouts_from_butler("dp1", collections="test", butler=butler)
@@ -291,6 +268,9 @@ def test_invalid_args():
 
     with pytest.raises(ValueError):
         svc.cutout(visit=1, detector=2, ra=10, h=5, w=5)
+
+    with pytest.raises(ValueError):
+        svc.cutout(ra=1, dec=2, h=5, w=5)
 
     with pytest.raises(ValueError):
         svc.cutout(visit=[1, 2], detector=[3, 4, 5], ra=[10, 11], dec=[20, 21], h=5, w=5)

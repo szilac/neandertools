@@ -4,30 +4,25 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, Optional, Union
+from typing import Any, Optional, Union
 
 from astropy.time import Time
 from lsst.daf.butler import Butler
 from lsst.geom import Box2I, Point2I, SpherePoint, degrees
 from lsst.sphgeom import LonLat, UnitVector3d
 
-DataId = dict[str, Any]
-SkyResolver = Callable[[float, float, Optional[Union[datetime, str]]], Iterable[DataId]]
-
 
 class ButlerCutoutService:
     """Generate cutouts from an LSST Butler repository."""
 
-    def __init__(self, butler: Any, sky_resolver: Optional[SkyResolver] = None) -> None:
+    def __init__(self, butler: Any) -> None:
         self._butler = butler
-        self._sky_resolver = sky_resolver
         self._visit_detector_index_cache: dict[str, list[dict[str, Any]]] = {}
 
     def cutout(
         self,
         ra: Optional[Union[float, Sequence[float]]] = None,
         dec: Optional[Union[float, Sequence[float]]] = None,
-        time: Optional[Union[datetime, str]] = None,
         x: Optional[Union[float, Sequence[float]]] = None,
         y: Optional[Union[float, Sequence[float]]] = None,
         h: Optional[int] = None,
@@ -36,7 +31,6 @@ class ButlerCutoutService:
         *,
         visit: Optional[Union[int, Sequence[int]]] = None,
         detector: Optional[Union[int, Sequence[int]]] = None,
-        limit: Optional[int] = None,
         pad: bool = True,
     ) -> list[Any]:
         _validate_request(ra=ra, dec=dec, x=x, y=y, h=h, w=w, visit=visit, detector=detector)
@@ -60,42 +54,23 @@ class ButlerCutoutService:
             x_values = [None] * n_centers
             y_values = [None] * n_centers
 
-        if visit is not None:
-            visit_values = _as_list(visit, "visit")
-            detector_values = _as_list(detector, "detector")
-            assert visit_values is not None and detector_values is not None
-            n_items = max(len(visit_values), len(detector_values), n_centers)
-            visit_values = _broadcast_to(visit_values, n_items, "visit")
-            detector_values = _broadcast_to(detector_values, n_items, "detector")
-            x_values = _broadcast_to(x_values, n_items, "x")
-            y_values = _broadcast_to(y_values, n_items, "y")
-            ra_values = _broadcast_to(ra_values, n_items, "ra")
-            dec_values = _broadcast_to(dec_values, n_items, "dec")
-
-            out = []
-            for v, d, xx, yy, rr, dd in zip(
-                visit_values, detector_values, x_values, y_values, ra_values, dec_values
-            ):
-                image = self._butler.get(dataset_type, dataId={"visit": int(v), "detector": int(d)})
-                out.append(self._extract_cutout(image, x=xx, y=yy, ra=rr, dec=dd, h=h, w=w, pad=pad))
-            return out
-
-        if self._sky_resolver is None:
-            raise NotImplementedError(
-                "Sky-position cutouts require a sky_resolver. "
-                "Pass one to cutouts_from_butler(..., sky_resolver=...)."
-            )
+        visit_values = _as_list(visit, "visit")
+        detector_values = _as_list(detector, "detector")
+        assert visit_values is not None and detector_values is not None
+        n_items = max(len(visit_values), len(detector_values), n_centers)
+        visit_values = _broadcast_to(visit_values, n_items, "visit")
+        detector_values = _broadcast_to(detector_values, n_items, "detector")
+        x_values = _broadcast_to(x_values, n_items, "x")
+        y_values = _broadcast_to(y_values, n_items, "y")
+        ra_values = _broadcast_to(ra_values, n_items, "ra")
+        dec_values = _broadcast_to(dec_values, n_items, "dec")
 
         out = []
-        for rr, dd in zip(ra_values, dec_values):
-            assert rr is not None and dd is not None
-            for data_id in self._sky_resolver(float(rr), float(dd), time):
-                image = self._butler.get(dataset_type, dataId=data_id)
-                out.append(
-                    self._extract_cutout(image, x=None, y=None, ra=float(rr), dec=float(dd), h=h, w=w, pad=pad)
-                )
-                if limit is not None and len(out) >= limit:
-                    return out
+        for v, d, xx, yy, rr, dd in zip(
+            visit_values, detector_values, x_values, y_values, ra_values, dec_values
+        ):
+            image = self._butler.get(dataset_type, dataId={"visit": int(v), "detector": int(d)})
+            out.append(self._extract_cutout(image, x=xx, y=yy, ra=rr, dec=dd, h=h, w=w, pad=pad))
         return out
 
     def find_visit_detector(
@@ -320,11 +295,10 @@ def cutouts_from_butler(
     *,
     collections: Union[str, list[str]],
     butler: Optional[Any] = None,
-    sky_resolver: Optional[SkyResolver] = None,
 ) -> ButlerCutoutService:
     if butler is None:
         butler = Butler(repo, collections=collections)
-    return ButlerCutoutService(butler=butler, sky_resolver=sky_resolver)
+    return ButlerCutoutService(butler=butler)
 
 
 def _validate_request(
@@ -359,9 +333,8 @@ def _validate_request(
 
     if visit_mode and (visit is None or detector is None):
         raise ValueError("Both visit and detector must be provided together")
-
-    if not visit_mode and (ra is None or dec is None):
-        raise ValueError("Provide either both ra/dec or visit/detector")
+    if not visit_mode:
+        raise ValueError("Both visit and detector must be provided together")
 
 
 def _is_sequence(value: Any) -> bool:

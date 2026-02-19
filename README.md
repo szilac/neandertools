@@ -55,9 +55,9 @@ images = svc.cutout(
 - `collections` is required when creating the service.
 - `dataset_type` is selected per `cutout(...)` call and defaults to `"visit_image"`.
 - `cutout(...)` center must be specified as either (`x`, `y`) or (`ra`, `dec`).
+- `cutout(...)` requires both `visit` and `detector`.
 - If center is (`ra`, `dec`), WCS is used to convert to pixel coordinates.
 - `visit`, `detector`, `x`, `y`, `ra`, and `dec` can be scalars or arrays. Arrays are paired by index.
 - If `h`/`w` are omitted they default to full image size.
 - `cutout(...)` pads edge-overlapping requests by default (`pad=True`) so the requested center stays at the center pixel; set `pad=False` to keep clipped behavior.
 - `find_visit_detector(...)` returns two 1D numpy arrays `(visit, detector)` for all matches that contain `(ra, dec)` and satisfy `begin <= t < end`; it accepts scalar or 1D vector inputs.
-- The sky-coordinate mode (`ra/dec/time`) is wired and needs a `sky_resolver` callback.
