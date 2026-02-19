@@ -62,10 +62,10 @@ class AsteroidCutoutPipeline:
         target_type: str = "smallbody",
         location: str = "X05",
         bands: Optional[list[str]] = None,
-        step: str = "4h",
+        step: str = "12h",
         cutout_size: int = 100,
         polygon_interval_days: float = 3.0,
-        polygon_widening_arcsec: float = 120.0,
+        polygon_widening_arcsec: float = 2.0,
     ) -> None:
         self.target = target
         self.start = start
@@ -74,7 +74,7 @@ class AsteroidCutoutPipeline:
         self.collection = collection
         self.target_type = target_type
         self.location = location
-        self.bands = bands or ["g", "r", "i"]
+        self.bands = bands or ["u", "g", "r", "i", "z", "y"]
         self.step = step
         self.cutout_size = cutout_size
         self.polygon_interval_days = polygon_interval_days
