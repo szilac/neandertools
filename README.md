@@ -12,7 +12,7 @@
 import neandertools as nt
 
 svc = nt.cutouts_from_butler(
-    "~/lsst/dp1_subset",
+    "dp1",
     collections=["LSSTComCam/runs/DRP/DP1/DM-51335"],
 )
 
