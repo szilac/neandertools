@@ -1,5 +1,7 @@
 # neandertools
 
+![neandertools logo](logo.png)
+
 `neandertools` provides a simple API for generating image cutouts from Rubin Observatory LSST Butler repositories.
 
 ## Quick start
