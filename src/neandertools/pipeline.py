@@ -92,6 +92,7 @@ class AsteroidCutoutPipeline:
         frame_duration_ms: int = 500,
         match_background: bool = True,
         match_noise: bool = False,
+        show_ne: bool = False,
     ) -> Path:
         """Execute the full pipeline and write an animated GIF.
 
@@ -107,6 +108,8 @@ class AsteroidCutoutPipeline:
         match_noise : bool
             If ``True``, also divide by per-cutout noise RMS so all frames
             share the same noise scale (SNR-like display).
+        show_ne : bool
+            If ``True``, draw a North/East compass indicator on each frame.
 
         Returns
         -------
@@ -127,6 +130,7 @@ class AsteroidCutoutPipeline:
             frame_duration_ms=frame_duration_ms,
             match_background=match_background,
             match_noise=match_noise,
+            show_ne=show_ne,
         )
         return gif_path
 
@@ -257,6 +261,7 @@ class AsteroidCutoutPipeline:
         frame_duration_ms: int,
         match_background: bool = True,
         match_noise: bool = False,
+        show_ne: bool = False,
     ) -> Path:
         """Step 5: Render cutouts to PNGs and assemble into a GIF."""
         output_path = Path(output_path)
@@ -283,6 +288,7 @@ class AsteroidCutoutPipeline:
                 cutout, png_path, title=title,
                 vmin=vmin, vmax=vmax,
                 array_override=norm_arrays[i] if norm_arrays[i] is not None else None,
+                show_ne=show_ne,
             )
 
         logger.info("Creating GIF with %d frames -> %s", len(self.cutouts), output_path)

@@ -132,8 +132,134 @@ def normalize_cutouts(cutout_arrays, match_background=True, match_noise=False):
 
     return processed, vmin, vmax
 
+def _get_ne_vectors(cutout_exposure):
+    """Compute North and East unit vectors in pixel coordinates.
 
-def cutout_to_png(cutout_exposure, output_path, title="", vmin=None, vmax=None, array_override=None):
+    Parameters
+    ----------
+    cutout_exposure : lsst.afw.image.ExposureF
+        Cutout with a valid WCS.
+
+    Returns
+    -------
+    (north_px, east_px) : tuple of np.ndarray
+        Each is a 2-element array ``[dx, dy]`` in pixel display coordinates
+        (relative to cutout origin), unit-normalized.
+        Returns ``None`` if WCS is unavailable.
+    """
+    if not hasattr(cutout_exposure, "getWcs") or cutout_exposure.getWcs() is None:
+        return None
+
+    wcs = cutout_exposure.getWcs()
+    bbox = cutout_exposure.getBBox()
+    xy0 = cutout_exposure.getXY0()
+    h, w = cutout_exposure.image.array.shape
+
+    # Center pixel in parent coordinates
+    xc = xy0.getX() + w / 2.0
+    yc = xy0.getY() + h / 2.0
+
+    # Small offset in pixels to probe WCS directions
+    delta = 5.0
+
+    # Sky coords at center and at +x, +y offsets
+    sky_c = wcs.pixelToSkyArray(np.array([xc]), np.array([yc]), degrees=True)
+    sky_x = wcs.pixelToSkyArray(np.array([xc + delta]), np.array([yc]), degrees=True)
+    sky_y = wcs.pixelToSkyArray(np.array([xc]), np.array([yc + delta]), degrees=True)
+
+    ra_c, dec_c = float(sky_c[0][0]), float(sky_c[1][0])
+    cos_dec = max(abs(np.cos(np.radians(dec_c))), 1e-6)
+
+    # Jacobian: pixel offset -> (East, North) in arcsec
+    # East = -dRA * cos(dec),  North = +dDec
+    dra_dx = (float(sky_x[0][0]) - ra_c) * cos_dec
+    ddec_dx = float(sky_x[1][0]) - dec_c
+    dra_dy = (float(sky_y[0][0]) - ra_c) * cos_dec
+    ddec_dy = float(sky_y[1][0]) - dec_c
+
+    # Jacobian maps pixel (dx, dy) -> (east_sky, north_sky)
+    # We want the inverse: given sky North=(0,1) and East=(1,0),
+    # find the pixel direction.
+    jac = np.array([[dra_dx, dra_dy],
+                     [ddec_dx, ddec_dy]])
+    try:
+        inv_jac = np.linalg.inv(jac)
+    except np.linalg.LinAlgError:
+        return None
+
+    # East in pixel coords (east_sky=1, north_sky=0)
+    east_px = inv_jac @ np.array([1.0, 0.0])
+    # North in pixel coords (east_sky=0, north_sky=1)
+    north_px = inv_jac @ np.array([0.0, 1.0])
+
+    # Normalize to unit vectors
+    e_norm = np.hypot(east_px[0], east_px[1])
+    n_norm = np.hypot(north_px[0], north_px[1])
+    if e_norm > 0:
+        east_px = east_px / e_norm
+    if n_norm > 0:
+        north_px = north_px / n_norm
+
+    return north_px, east_px
+
+
+def _draw_ne_indicator(ax, cutout_exposure, arrow_frac=0.15):
+    """Draw a North/East compass indicator on a plot axes.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes to draw on.
+    cutout_exposure : lsst.afw.image.ExposureF
+        Cutout with WCS (used to compute N/E directions).
+    arrow_frac : float
+        Arrow length as a fraction of the image size.
+    """
+    vectors = _get_ne_vectors(cutout_exposure)
+    if vectors is None:
+        return
+
+    north_px, east_px = vectors
+    h, w = cutout_exposure.image.array.shape
+
+    # Arrow origin: top-right corner area
+    ox = w * 0.85
+    oy = h * 0.85
+    length = min(h, w) * arrow_frac
+
+    # North arrow
+    ax.annotate(
+        "", xy=(ox + length * north_px[0], oy + length * north_px[1]),
+        xytext=(ox, oy),
+        arrowprops=dict(arrowstyle="-|>", color="cyan", lw=1.5),
+        zorder=10,
+    )
+    ax.text(
+        ox + length * 1.25 * north_px[0],
+        oy + length * 1.25 * north_px[1],
+        "N", color="cyan", fontsize=7, fontweight="bold",
+        ha="center", va="center", zorder=10,
+    )
+
+    # East arrow
+    ax.annotate(
+        "", xy=(ox + length * east_px[0], oy + length * east_px[1]),
+        xytext=(ox, oy),
+        arrowprops=dict(arrowstyle="-|>", color="yellow", lw=1.5),
+        zorder=10,
+    )
+    ax.text(
+        ox + length * 1.25 * east_px[0],
+        oy + length * 1.25 * east_px[1],
+        "E", color="yellow", fontsize=7, fontweight="bold",
+        ha="center", va="center", zorder=10,
+    )
+
+
+def cutout_to_png(
+    cutout_exposure, output_path, title="",
+    vmin=None, vmax=None, array_override=None, show_ne=False,
+):
     """Render an LSST ExposureF cutout to a PNG file.
 
     Parameters
@@ -151,6 +277,8 @@ def cutout_to_png(cutout_exposure, output_path, title="", vmin=None, vmax=None, 
     array_override : np.ndarray or None
         If provided, render this array instead of ``cutout_exposure.image.array``.
         Used for background-subtracted / normalized data.
+    show_ne : bool
+        If ``True``, draw a North/East compass indicator.
     """
     if array_override is not None:
         image_array = array_override
@@ -164,6 +292,9 @@ def cutout_to_png(cutout_exposure, output_path, title="", vmin=None, vmax=None, 
     else:
         norm = ImageNormalize(image_array, interval=ZScaleInterval())
         ax.imshow(image_array, origin="lower", cmap="gray", norm=norm)
+
+    if show_ne:
+        _draw_ne_indicator(ax, cutout_exposure)
 
     ax.set_title(title, fontsize=8)
     ax.axis("off")
@@ -182,6 +313,7 @@ def cutouts_grid(
     output_path=None,
     dpi=100,
     show=True,
+    show_ne=False,
 ):
     """Display cutouts in a grid with matched background/noise.
 
@@ -209,6 +341,8 @@ def cutouts_grid(
         Resolution for the saved figure.
     show : bool
         If ``True``, call ``plt.show()``.
+    show_ne : bool
+        If ``True``, draw a North/East compass indicator on each panel.
 
     Returns
     -------
@@ -242,6 +376,8 @@ def cutouts_grid(
             norm_arrays[i], origin="lower", cmap=cmap,
             vmin=vmin, vmax=vmax, interpolation="nearest",
         )
+        if show_ne:
+            _draw_ne_indicator(ax, cutouts[i])
         if metadata is not None and i < len(metadata):
             meta = metadata[i]
             title = f"{meta['band']}-band\n{meta['time'].utc.iso[:16]}"
