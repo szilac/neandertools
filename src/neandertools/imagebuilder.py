@@ -242,13 +242,13 @@ def _draw_ne_indicator(ax, cutout_exposure, arrow_frac=0.15):
     ax.annotate(
         "", xy=(ox + length * north_px[0], oy + length * north_px[1]),
         xytext=(ox, oy),
-        arrowprops=dict(arrowstyle="-|>", color="cyan", lw=1.5),
+        arrowprops=dict(arrowstyle="-|>", color="red", lw=1.5),
         zorder=10,
     )
     ax.text(
         ox + length * 1.25 * north_px[0],
         oy + length * 1.25 * north_px[1],
-        "N", color="cyan", fontsize=7, fontweight="bold",
+        "N", color="red", fontsize=7, fontweight="bold",
         ha="center", va="center", zorder=10,
     )
 
@@ -256,13 +256,13 @@ def _draw_ne_indicator(ax, cutout_exposure, arrow_frac=0.15):
     ax.annotate(
         "", xy=(ox + length * east_px[0], oy + length * east_px[1]),
         xytext=(ox, oy),
-        arrowprops=dict(arrowstyle="-|>", color="yellow", lw=1.5),
+        arrowprops=dict(arrowstyle="-|>", color="cyan", lw=1.5),
         zorder=10,
     )
     ax.text(
         ox + length * 1.25 * east_px[0],
         oy + length * 1.25 * east_px[1],
-        "E", color="yellow", fontsize=7, fontweight="bold",
+        "E", color="cyan", fontsize=7, fontweight="bold",
         ha="center", va="center", zorder=10,
     )
 
