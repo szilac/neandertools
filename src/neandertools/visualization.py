@@ -1,3 +1,5 @@
+# FINAL VERSION WCS
+
 """Visualization helpers for image collections."""
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+from astropy.visualization import ZScaleInterval, ImageNormalize
 
 
 def cutouts_grid(
@@ -30,6 +33,8 @@ def cutouts_grid(
     add_colorbar: bool = False,
     cmap: str = "gray",
     show: bool = True,
+    auto_vlims: bool = False,
+    contrast: float = 0.1
 ):
     """Display images in a grid with linear quantile normalization.
 
@@ -78,6 +83,10 @@ def cutouts_grid(
         Matplotlib colormap name.
     show : bool, optional
         If ``True``, call ``plt.show()`` before returning.
+    auto_vlims : bool, optional
+        If ``True``, automatically adjust display limits. Overrides the qmin and qmax parameters if True.
+    contrast : float, optional
+        Contrast parameter for automatic display limits when ``auto_vlims=True``. This is passed to ``astropy.visualization.ZScaleInterval`` and controls the aggressiveness of the scaling; higher values result in a smaller range.
 
     Returns
     -------
@@ -96,6 +105,8 @@ def cutouts_grid(
         warp_common_grid=warp_common_grid,
         warp_shape=warp_shape,
         warp_pixel_scale_arcsec=warp_pixel_scale_arcsec,
+        auto_vlims=auto_vlims,
+        contrast=contrast,
     )
     if ne_indicator_scale <= 0:
         raise ValueError("ne_indicator_scale must be > 0")
@@ -133,11 +144,15 @@ def cutouts_grid(
 
         if add_colorbar:
             fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
         if warp_common_grid:
+            # _warp_to_common_radec_grid edited to have RA increase to the left
+            # N/E vectors calculated from the actual WCS
             ax.set_xlabel("Delta R.A. (arcsec)")
             ax.invert_xaxis()  # East to the left.
             if c == 0:
                 ax.set_ylabel("Delta Dec. (arcsec)")
+
         if show_ne_indicator:
             _draw_ne_indicator(ax, ne_vectors[i], scale_frac=ne_indicator_scale)
 
@@ -173,6 +188,8 @@ def cutouts_gif(
     dpi: int = 100,
     title_fontsize: float = 12.0,
     show: bool = False,
+    auto_vlims: bool = False,
+    contrast: float = 0.1,
 ) -> Path:
     """Save cutouts as an animated GIF.
 
@@ -203,6 +220,8 @@ def cutouts_gif(
         warp_common_grid=warp_common_grid,
         warp_shape=warp_shape,
         warp_pixel_scale_arcsec=warp_pixel_scale_arcsec,
+        auto_vlims=auto_vlims,
+        contrast=contrast,
     )
     if ne_indicator_scale <= 0:
         raise ValueError("ne_indicator_scale must be > 0")
@@ -246,8 +265,11 @@ def cutouts_gif(
             im.set_data(arr)
             im.set_clim(vmins[i], vmaxs[i])
             im.set_extent(extents[i])
+
+            # Use the direction encoded in the extent itself.
             ax.set_xlim(extents[i][0], extents[i][1])
             ax.set_ylim(extents[i][2], extents[i][3])
+
             if show_ne_indicator:
                 for artist in ne_artists:
                     artist.remove()
@@ -278,6 +300,8 @@ def _prepare_cutouts_for_display(
     warp_common_grid: bool,
     warp_shape: tuple[int, int] | None,
     warp_pixel_scale_arcsec: float | None,
+    auto_vlims: bool,
+    contrast: float,
 ) -> tuple[
     list[np.ndarray],
     list[float],
@@ -290,7 +314,7 @@ def _prepare_cutouts_for_display(
         raise ValueError("No images provided.")
     if not (0.0 <= qmin <= 1.0 and 0.0 <= qmax <= 1.0):
         raise ValueError("qmin and qmax must be in [0, 1]")
-    if qmax < qmin:
+    if qmax < qmin and not auto_vlims:
         raise ValueError("qmax must be >= qmin")
     if sigma_clip <= 0:
         raise ValueError("sigma_clip must be > 0")
@@ -323,14 +347,14 @@ def _prepare_cutouts_for_display(
     if warp_common_grid:
         if any(info["wcs"] is None for info in image_info):
             raise ValueError("warp_common_grid=True requires WCS for all input cutouts.")
-        arrays, extent = _warp_to_common_radec_grid(
+        arrays, extent, ne_vec = _warp_to_common_radec_grid(
             arrays=arrays,
             image_info=image_info,
             warp_shape=warp_shape,
             warp_pixel_scale_arcsec=warp_pixel_scale_arcsec,
         )
         extents = [extent] * n
-        ne_vectors = [(np.array([1.0, 0.0]), np.array([0.0, 1.0]))] * n
+        ne_vectors = [ne_vec] * n
     else:
         for arr, info in zip(arrays, image_info):
             extent_i, ne_i = _estimate_nonwarp_extent_and_ne(arr, info)
@@ -358,12 +382,19 @@ def _prepare_cutouts_for_display(
         if not finite_parts:
             raise ValueError("No finite pixels available to determine display scale.")
         all_values = np.concatenate(finite_parts)
-        shared_vmin = float(np.quantile(all_values, qmin))
-        shared_vmax = float(np.quantile(all_values, qmax))
-        if shared_vmax <= shared_vmin:
-            shared_vmax = shared_vmin + 1e-12
-        vmins = [shared_vmin] * n
-        vmaxs = [shared_vmax] * n
+        
+        if auto_vlims:
+            norm = ZScaleInterval(contrast=contrast, krej=3).get_limits(all_values)
+            vmins = [norm[0]] * n
+            vmaxs = [norm[1]] * n
+        else:
+            shared_vmin = float(np.quantile(all_values, qmin))
+            shared_vmax = float(np.quantile(all_values, qmax))
+            if shared_vmax <= shared_vmin:
+                shared_vmax = shared_vmin + 1e-12
+            vmins = [shared_vmin] * n
+            vmaxs = [shared_vmax] * n
+        
     else:
         for arr in proc_arrays:
             vmin = float(np.nanquantile(arr, qmin))
@@ -372,6 +403,8 @@ def _prepare_cutouts_for_display(
                 vmax = vmin + 1e-12
             vmins.append(vmin)
             vmaxs.append(vmax)
+
+    print(vmins, vmaxs)
 
     return proc_arrays, vmins, vmaxs, extents, ne_vectors
 
@@ -631,7 +664,11 @@ def _warp_to_common_radec_grid(
     image_info: list[dict[str, Any]],
     warp_shape: tuple[int, int] | None,
     warp_pixel_scale_arcsec: float | None,
-) -> tuple[list[np.ndarray], tuple[float, float, float, float]]:
+) -> tuple[
+    list[np.ndarray],
+    tuple[float, float, float, float],
+    tuple[np.ndarray, np.ndarray] | None,
+]:
     try:
         import lsst.afw.geom as afwGeom
         import lsst.afw.image as afwImage
@@ -682,15 +719,17 @@ def _warp_to_common_radec_grid(
     else:
         pixel_scale_deg = float(warp_pixel_scale_arcsec) / 3600.0
 
-    # Define common target TAN WCS with +x toward increasing RA and +y toward
-    # increasing Dec.
+    # Define common target TAN WCS in the astronomical display:
+    # North up (+y -> increasing Dec) and East left (+x -> decreasing RA).
+    cos_dec0 = max(abs(np.cos(np.deg2rad(dec0))), 1e-6)
     cd = np.array(
         [
-            [pixel_scale_deg / max(abs(np.cos(np.deg2rad(dec0))), 1e-6), 0.0],
+            [-pixel_scale_deg / cos_dec0, 0.0],
             [0.0, pixel_scale_deg],
         ],
         dtype=np.float64,
     )
+
     cx = (out_w - 1) / 2.0
     cy = (out_h - 1) / 2.0
     dest_wcs = afwGeom.makeSkyWcs(
@@ -700,7 +739,8 @@ def _warp_to_common_radec_grid(
     )
 
     warp_ctrl = afwMath.WarpingControl("lanczos3")
-    warped_arrays = []
+    warped_arrays: list[np.ndarray] = []
+
     for arr, info in zip(arrays, image_info):
         src_wcs = info["wcs"]
         x0 = int(round(info["x0"]))
@@ -715,8 +755,50 @@ def _warp_to_common_radec_grid(
 
     x_arcsec = (np.arange(out_w, dtype=np.float64) - cx) * (pixel_scale_deg * 3600.0)
     y_arcsec = (np.arange(out_h, dtype=np.float64) - cy) * (pixel_scale_deg * 3600.0)
-    extent = (float(x_arcsec[0]), float(x_arcsec[-1]), float(y_arcsec[0]), float(y_arcsec[-1]))
-    return warped_arrays, extent
+
+
+    extent = (
+        float(x_arcsec[-1]),
+        float(x_arcsec[0]),
+        float(y_arcsec[0]),
+        float(y_arcsec[-1]),
+    )
+
+    # Calculate N/E vectors from the WCS, then convert the
+    # resulting pixel-space vectors into the displayed (extent) data coordinates.
+    ne_vec: tuple[np.ndarray, np.ndarray] | None = None
+    try:
+        xc = cx
+        yc = cy
+        ra_c, dec_c = dest_wcs.pixelToSkyArray(np.array([xc]), np.array([yc]), degrees=True)
+        ra_x, dec_x = dest_wcs.pixelToSkyArray(np.array([xc + 1.0]), np.array([yc]), degrees=True)
+        ra_y, dec_y = dest_wcs.pixelToSkyArray(np.array([xc]), np.array([yc + 1.0]), degrees=True)
+
+        cos_dec = max(abs(np.cos(np.deg2rad(float(dec_c[0])))), 1e-6)
+        a11 = _wrap_angle_diff_deg(float(ra_x[0]) - float(ra_c[0])) * cos_dec * 3600.0
+        a21 = (float(dec_x[0]) - float(dec_c[0])) * 3600.0
+        a12 = _wrap_angle_diff_deg(float(ra_y[0]) - float(ra_c[0])) * cos_dec * 3600.0
+        a22 = (float(dec_y[0]) - float(dec_c[0])) * 3600.0
+        jac = np.array([[a11, a12], [a21, a22]], dtype=np.float64)  # pix -> (E,N) arcsec
+
+        inv = np.linalg.inv(jac)  # (E,N) -> pix
+        p_e = inv @ np.array([1.0, 0.0], dtype=np.float64)
+        p_n = inv @ np.array([0.0, 1.0], dtype=np.float64)
+
+        # Map pixel vectors into displayed data coordinates.
+        # For imshow(extent=...), pixel col i maps linearly from extent[0]..extent[1].
+        dx_per_pix = (extent[1] - extent[0]) / max(float(out_w - 1), 1.0)
+        dy_per_pix = (extent[3] - extent[2]) / max(float(out_h - 1), 1.0)
+
+        d_e = np.array([p_e[0] * dx_per_pix, p_e[1] * dy_per_pix], dtype=np.float64)
+        d_n = np.array([p_n[0] * dx_per_pix, p_n[1] * dy_per_pix], dtype=np.float64)
+
+        if np.all(np.isfinite(d_e)) and np.all(np.isfinite(d_n)):
+            ne_vec = (d_e, d_n)
+    except Exception:
+        ne_vec = None
+
+    return warped_arrays, extent, ne_vec
 
 
 def _circular_mean_deg(values_deg: Sequence[float]) -> float:
@@ -728,3 +810,4 @@ def _circular_mean_deg(values_deg: Sequence[float]) -> float:
 
 def _wrap_angle_diff_deg(delta_deg: float) -> float:
     return (delta_deg + 180.0) % 360.0 - 180.0
+    
