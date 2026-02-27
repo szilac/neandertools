@@ -3,12 +3,16 @@
 
 Examples
 --------
-# Minimal — uses all defaults (dp1, LSSTComCam/DP1, all bands):
+# Minimal — GIF only, all defaults (dp1, LSSTComCam/DP1, all bands):
 python run_pipeline.py "2024 TN57" 2024-12-01 2024-12-30
 
-# Save to a custom path, only r-band, with WCS warping:
+# GIF + grid side-by-side:
+python run_pipeline.py "2024 TN57" 2024-12-01 2024-12-30 --grid
+
+# Custom paths, r-band only, WCS warping, 6-column grid:
 python run_pipeline.py "2024 TN57" 2024-12-01 2024-12-30 \
-    --output my_asteroid.gif --bands r --warp
+    --output my_asteroid.gif --grid --grid-output my_grid.png \
+    --bands r --warp --grid-ncols 6
 
 # Larger cutouts, slower GIF, no background matching:
 python run_pipeline.py Ceres 2024-11-01 2024-11-15 \
@@ -21,11 +25,12 @@ python run_pipeline.py "2024 TN57" 2024-12-01 2024-12-30 -v
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Generate an animated GIF of asteroid cutouts from Rubin/LSST data.",
+        description="Generate an animated GIF (and optionally a grid image) of asteroid cutouts from Rubin/LSST data.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -52,13 +57,11 @@ def parse_args():
     p.add_argument("--target-type",        default="smallbody",
                    help="Horizons id_type")
 
-    # Cutout / display
+    # Cutout / display (shared by both GIF and grid)
     p.add_argument("--cutout-size",     default=100,  type=int,
                    metavar="PX", help="Cutout side length in pixels")
-    p.add_argument("--output",          default="asteroid.gif",
-                   help="Output GIF file path")
-    p.add_argument("--frame-duration",  default=500,  type=int,
-                   metavar="MS", help="Duration of each GIF frame in milliseconds")
+    p.add_argument("--cmap",            default="gray",
+                   help="Matplotlib colormap name")
 
     p.add_argument("--match-background", dest="match_background",
                    action="store_true",  default=True,
@@ -70,9 +73,26 @@ def parse_args():
     p.add_argument("--match-noise", action="store_true", default=False,
                    help="Divide by per-cutout RMS (SNR-like display)")
     p.add_argument("--show-ne",     action="store_true", default=False,
-                   help="Draw a North/East compass indicator on each frame")
+                   help="Draw a North/East compass indicator on each frame/panel")
     p.add_argument("--warp",        action="store_true", default=False,
                    help="Warp all cutouts onto a common sky grid (requires LSST warp modules)")
+
+    # GIF-specific
+    p.add_argument("--output",          default="asteroid.gif",
+                   help="Output GIF file path")
+    p.add_argument("--frame-duration",  default=500,  type=int,
+                   metavar="MS", help="Duration of each GIF frame in milliseconds")
+
+    # Grid
+    p.add_argument("--grid",            action="store_true", default=False,
+                   help="Also save a grid image of all cutout frames")
+    p.add_argument("--grid-output",     default=None,
+                   metavar="PATH",
+                   help="Grid image output path (default: <gif-stem>_grid.png)")
+    p.add_argument("--grid-ncols",      default=5,  type=int,
+                   metavar="N", help="Number of columns in the grid")
+    p.add_argument("--grid-dpi",        default=150, type=int,
+                   metavar="DPI", help="Resolution of the saved grid image")
 
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Enable DEBUG logging")
@@ -133,6 +153,37 @@ def main():
 
     logging.info("Done. %d frame(s) -> %s", n, gif_path)
     print(gif_path)
+
+    if args.grid:
+        import matplotlib
+        matplotlib.use("Agg")  # ensure no display is required
+        import matplotlib.pyplot as plt
+
+        # Derive default grid output path from the GIF path
+        grid_path = Path(args.grid_output) if args.grid_output else Path(args.output).with_name(
+            Path(args.output).stem + "_grid.png"
+        )
+
+        logging.info("Saving cutout grid (%d cols) -> %s", args.grid_ncols, grid_path)
+
+        fig, _ = pipeline.grid(
+            ncols=args.grid_ncols,
+            match_background=args.match_background,
+            match_noise=args.match_noise,
+            show_ne=args.show_ne,
+            warp_common_grid=args.warp,
+            cmap=args.cmap,
+            show=False,
+        )
+
+        if fig is not None:
+            grid_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(grid_path, dpi=args.grid_dpi, bbox_inches="tight")
+            plt.close(fig)
+            logging.info("Grid saved -> %s", grid_path)
+            print(grid_path)
+        else:
+            logging.warning("Grid could not be generated.")
 
 
 if __name__ == "__main__":
