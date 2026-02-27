@@ -404,8 +404,6 @@ def _prepare_cutouts_for_display(
             vmins.append(vmin)
             vmaxs.append(vmax)
 
-    print(vmins, vmaxs)
-
     return proc_arrays, vmins, vmaxs, extents, ne_vectors
 
 

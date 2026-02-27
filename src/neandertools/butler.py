@@ -320,7 +320,16 @@ class ButlerCutoutService:
         clipped_box.clip(bbox)
         if clipped_box.isEmpty():
             return None
-        
+
+        # If the target center falls outside the valid (trimmed) pixel data, the
+        # padded cutout would have NaN at the target position and be useless.
+        # This happens when the LSST pipeline trims border pixels without updating
+        # the WCS, so wcs.skyToPixel() can return coordinates in the removed strip.
+        cx = (requested_box.getMinX() + requested_box.getMaxX()) // 2
+        cy = (requested_box.getMinY() + requested_box.getMaxY()) // 2
+        if not bbox.contains(Point2I(cx, cy)):
+            return None
+
         source_cutout = image.Factory(image, clipped_box)
 
         source_array = self._get_primary_array(source_cutout)
